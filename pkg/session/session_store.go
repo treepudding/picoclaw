@@ -1,6 +1,9 @@
 package session
 
-import "github.com/sipeed/picoclaw/pkg/providers"
+import (
+	"github.com/sipeed/picoclaw/pkg/memory"
+	"github.com/sipeed/picoclaw/pkg/providers"
+)
 
 // SessionStore defines the persistence operations used by the agent loop.
 // Both SessionManager (legacy JSON backend) and JSONLBackend satisfy this
@@ -21,6 +24,10 @@ type SessionStore interface {
 	GetSummary(key string) string
 	// SetSummary replaces the conversation summary.
 	SetSummary(key, summary string)
+	// GetStructuredSummary returns L2 structured summary, or nil if none.
+	GetStructuredSummary(key string) *memory.StructuredSummary
+	// SetStructuredSummary updates the L2 structured summary.
+	SetStructuredSummary(key string, summary *memory.StructuredSummary)
 	// SetHistory replaces the full message history.
 	SetHistory(key string, history []providers.Message)
 	// TruncateHistory keeps only the last keepLast messages.

@@ -241,6 +241,55 @@ func TestSetSummary_GetSummary(t *testing.T) {
 	}
 }
 
+func TestGetStructuredSummary_SetStructuredSummary(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	got, err := store.GetStructuredSummary(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetStructuredSummary: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil for new session, got %+v", got)
+	}
+
+	s := &StructuredSummary{
+		Facts:        []string{"f1"},
+		Preferences:  []string{"answer briefly"},
+		CurrentTask:  "task",
+		PendingItems: []string{"todo"},
+	}
+	err = store.SetStructuredSummary(ctx, "s1", s)
+	if err != nil {
+		t.Fatalf("SetStructuredSummary: %v", err)
+	}
+	got, err = store.GetStructuredSummary(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetStructuredSummary: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected non-nil after Set")
+	}
+	if len(got.Facts) != 1 || got.Facts[0] != "f1" {
+		t.Errorf("Facts = %v", got.Facts)
+	}
+	if got.CurrentTask != "task" {
+		t.Errorf("CurrentTask = %q", got.CurrentTask)
+	}
+
+	err = store.SetStructuredSummary(ctx, "s1", nil)
+	if err != nil {
+		t.Fatalf("SetStructuredSummary(nil): %v", err)
+	}
+	got, err = store.GetStructuredSummary(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetStructuredSummary: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil after clear, got %+v", got)
+	}
+}
+
 func TestTruncateHistory_KeepLast(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

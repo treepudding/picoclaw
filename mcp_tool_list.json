@@ -1,0 +1,316 @@
+{
+    "tools": [
+      {
+        "name": "simulation_flow_portfolio_service_createOrder_2",
+        "description": "下单",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "requestBody": {
+              "required": [
+                "currency",
+                "instrument",
+                "orderType",
+                "quantity",
+                "side",
+                "symbol"
+              ],
+              "type": "object",
+              "properties": {
+                "quantity": {
+                  "type": "number"
+                },
+                "price": {
+                  "type": "number"
+                },
+                "instrument": {
+                  "type": "string",
+                  "enum": [
+                    "UNKNOWN",
+                    "STOCK",
+                    "OPTION",
+                    "FUTURE",
+                    "FOREX",
+                    "CRYPTO",
+                    "FX_CONVERSION",
+                    "CFD",
+                    "RF_MONEY_BOX",
+                    "SUB_ACCOUNT",
+                    "IPO"
+                  ]
+                },
+                "currency": {
+                  "type": "string"
+                },
+                "symbol": {
+                  "type": "string"
+                },
+                "orderType": {
+                  "type": "string",
+                  "enum": [
+                    "MARKET_ORDER",
+                    "LIMIT_ORDER",
+                    "STOP_ORDER",
+                    "STOP_LIMIT_ORDER",
+                    "TRAILING_STOP_AMOUNT_ORDER",
+                    "TRAILING_STOP_PERCENT_ORDER",
+                    "LIMIT_IF_TOUCHED_ORDER",
+                    "TWAP_ORDER",
+                    "IPO_STANDARD_SUBSCRIPTION",
+                    "IPO_BANK_FINANCING_SUBSCRIPTION",
+                    "IPO_SECURITIES_FINANCING_SUBSCRIPTION"
+                  ]
+                },
+                "side": {
+                  "type": "string",
+                  "enum": [
+                    "BUY",
+                    "SELL"
+                  ]
+                },
+                "validity": {
+                  "type": "string",
+                  "enum": [
+                    "GOOD_TILL_CANCELLED",
+                    "GOOD_FOR_DAY"
+                  ]
+                },
+                "session": {
+                  "type": "string",
+                  "enum": [
+                    "TRADING_SESSION",
+                    "ALL_SESSIONS",
+                    "GREY_MARKET_SESSION"
+                  ]
+                }
+              },
+              "description": "[body] JSON request body"
+            },
+            "authorization": {
+              "type": "string",
+              "description": "[header] 登录接口返回的 token，格式: Bearer <token>"
+            }
+          },
+          "required": [
+            "requestBody",
+            "authorization"
+          ]
+        }
+      },
+      {
+        "name": "simulation_flow_portfolio_service_getTradableQuantities-api",
+        "description": "查询可交易数量\n\n根据用户ID、交易标的、交易市场等参数，查询当前用户在指定市场上指定标的的可交易数量。",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "symbol": {
+              "type": "string",
+              "description": "[query] 交易标的，例如 \"01234.HK\"。"
+            },
+            "market": {
+              "type": "string",
+              "description": "[query] 交易市场，例如 \"HK\"。"
+            },
+            "price": {
+              "type": "number",
+              "description": "[query] （可选）交易价格。如果为空，则默认使用当前市场价格。"
+            },
+            "greyMarket": {
+              "type": "boolean",
+              "default": false,
+              "description": "[query] （可选）是否为暗盘交易。默认值为 false。"
+            },
+            "side": {
+              "type": "string",
+              "enum": [
+                "BUY",
+                "SELL"
+              ],
+              "default": "BUY",
+              "description": "[query] 交易方向，BUY(0)或SELL(1)"
+            },
+            "authorization": {
+              "type": "string",
+              "description": "[header] 登录接口返回的 token，格式: Bearer <token>"
+            }
+          },
+          "required": [
+            "symbol",
+            "market",
+            "authorization"
+          ]
+        }
+      },
+      {
+        "name": "simulation_flow_portfolio_service_getPositionsByUserId_1",
+        "description": "根据用户ID查询用户持仓列表\n\n根据用户ID和可选的子账户ID，返回用户的持仓列表，支持多语言展示。",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "authorization": {
+              "type": "string",
+              "description": "[header] 登录接口返回的 token，格式: Bearer <token>"
+            }
+          },
+          "required": [
+            "authorization"
+          ]
+        }
+      },
+      {
+        "name": "simulation_flow_portfolio_service_getOrders_5",
+        "description": "根据用户ID查询用户订单列表\n\n根据用户ID和可选的子账户ID、订单状态、市场等条件，返回指定时间范围内的用户订单列表。",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "orderStatuses": {
+              "type": "string",
+              "enum": [
+                "ORDER_SUBMITTED",
+                "ORDER_PARTIALLY_FILLED",
+                "ORDER_FILLED",
+                "ORDER_CANCELLING",
+                "ORDER_PARTIALLY_CANCELLED",
+                "ORDER_CANCELLED",
+                "ORDER_SUBMIT_FAILED",
+                "ORDER_ERROR",
+                "ORDER_EXPIRED",
+                "ORDER_CANCEL_FAILED",
+                "ORDER_UNDEFINED"
+              ],
+              "description": "[query] 订单状态列表, 状态枚举值：ORDER_SUBMITTED(0),  ORDER_PARTIALLY_FILLED(1),  ORDER_FILLED(2),  ORDER_CANCELLING(3),  ORDER_PARTIALLY_CANCELLED(4),  ORDER_CANCELLED(5),  ORDER_SUBMIT_FAILED(6),  ORDER_ERROR(7),  ORDER_EXPIRED(8),  ORDER_CANCEL_FAILED(9),  ORDER_UNDEFINED(15)"
+            },
+            "markets": {
+              "type": "string",
+              "description": "[query] 市场列表,例如：US、HK、SH、SZ、OSUS、OSHK、CP、RF"
+            },
+            "tradeTimeFrom": {
+              "type": "string",
+              "format": "int64",
+              "description": "[query] 交易时间从（毫秒级时间戳）"
+            },
+            "tradeTimeTo": {
+              "type": "string",
+              "format": "int64",
+              "description": "[query] 交易时间到（毫秒级时间戳）"
+            },
+            "symbol": {
+              "type": "string",
+              "description": "[query] 交易标的"
+            },
+            "cursor": {
+              "type": "string",
+              "format": "int64",
+              "default": 0,
+              "description": "[query] 游标"
+            },
+            "limit": {
+              "type": "string",
+              "format": "int64",
+              "default": 30,
+              "description": "[query] 每页订单数量"
+            },
+            "authorization": {
+              "type": "string",
+              "description": "[header] 登录接口返回的 token，格式: Bearer <token>"
+            }
+          },
+          "required": [
+            "tradeTimeFrom",
+            "tradeTimeTo",
+            "authorization"
+          ]
+        }
+      },
+      {
+        "name": "simulation_flow_portfolio_service_getAssetsByUserId",
+        "description": "根据用户ID查询用户资产列表\n\n根据用户ID和可选的子账户ID、语言设置，返回用户的资产列表信息。",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "authorization": {
+              "type": "string",
+              "description": "[header] 登录接口返回的 token，格式: Bearer <token>"
+            }
+          },
+          "required": [
+            "authorization"
+          ]
+        }
+      },
+      {
+        "name": "simulation_flow_portfolio_service_getOrderById",
+        "description": "查询订单详情",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "orderId": {
+              "type": "string",
+              "format": "int64",
+              "description": "[path]"
+            },
+            "authorization": {
+              "type": "string",
+              "description": "[header] 登录接口返回的 token，格式: Bearer <token>"
+            }
+          },
+          "required": [
+            "orderId",
+            "authorization"
+          ]
+        }
+      },
+      {
+        "name": "simulation_flow_portfolio_service_cancelOrder_2",
+        "description": "取消订单",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "orderId": {
+              "type": "string",
+              "format": "int64",
+              "description": "[path]"
+            },
+            "authorization": {
+              "type": "string",
+              "description": "[header] 登录接口返回的 token，格式: Bearer <token>"
+            }
+          },
+          "required": [
+            "orderId",
+            "authorization"
+          ]
+        }
+      },
+      {
+        "name": "simulation_flow_user_account_service_login",
+        "description": "用户登录\n\n根据用户的用户信息和 token ,验证登录并返回访问令牌",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "requestBody": {
+              "type": "object",
+              "description": "[body] 登录请求体，仅需传账号和密码。",
+              "properties": {
+                "identity": {
+                  "type": "string",
+                  "description": "登录账号，例如手机号或邮箱。"
+                },
+                "password": {
+                  "type": "string",
+                  "description": "登录密码或凭证。"
+                }
+              },
+              "required": [
+                "identity",
+                "password"
+              ]
+            }
+          },
+          "required": [
+            "requestBody"
+          ]
+        }
+      }
+    ]
+  }

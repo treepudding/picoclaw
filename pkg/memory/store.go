@@ -26,6 +26,13 @@ type Store interface {
 	// SetSummary updates the conversation summary for a session.
 	SetSummary(ctx context.Context, sessionKey, summary string) error
 
+	// GetStructuredSummary returns the structured summary for a session (L2 memory).
+	// Returns nil if none exists.
+	GetStructuredSummary(ctx context.Context, sessionKey string) (*StructuredSummary, error)
+
+	// SetStructuredSummary updates the structured summary for a session.
+	SetStructuredSummary(ctx context.Context, sessionKey string, summary *StructuredSummary) error
+
 	// TruncateHistory removes all but the last keepLast messages from a session.
 	// If keepLast <= 0, all messages are removed.
 	TruncateHistory(ctx context.Context, sessionKey string, keepLast int) error

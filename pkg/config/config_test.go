@@ -448,6 +448,12 @@ func TestDefaultConfig_SummarizationThresholds(t *testing.T) {
 	if cfg.Agents.Defaults.SummarizeTokenPercent != 75 {
 		t.Errorf("SummarizeTokenPercent = %d, want 75", cfg.Agents.Defaults.SummarizeTokenPercent)
 	}
+	if cfg.Agents.Defaults.ShortTermMessages != 10 {
+		t.Errorf("ShortTermMessages = %d, want 10", cfg.Agents.Defaults.ShortTermMessages)
+	}
+	if cfg.Agents.Defaults.LongTermRetentionDays != 30 {
+		t.Errorf("LongTermRetentionDays = %d, want 30", cfg.Agents.Defaults.LongTermRetentionDays)
+	}
 }
 
 func TestDefaultConfig_DMScope(t *testing.T) {

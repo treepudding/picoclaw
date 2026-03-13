@@ -25,6 +25,7 @@ import (
 	"github.com/sipeed/picoclaw/pkg/config"
 	"github.com/sipeed/picoclaw/pkg/constants"
 	"github.com/sipeed/picoclaw/pkg/logger"
+	"github.com/sipeed/picoclaw/pkg/memory"
 	"github.com/sipeed/picoclaw/pkg/mcp"
 	"github.com/sipeed/picoclaw/pkg/media"
 	"github.com/sipeed/picoclaw/pkg/providers"
@@ -799,6 +800,9 @@ func (al *AgentLoop) runAgentLoop(
 	if !opts.NoHistory {
 		history = agent.Sessions.GetHistory(opts.SessionKey)
 		summary = agent.Sessions.GetSummary(opts.SessionKey)
+		if s := agent.Sessions.GetStructuredSummary(opts.SessionKey); s != nil && !s.IsEmpty() {
+			summary = appendStructuredToSummary(summary, s)
+		}
 	}
 	messages := agent.ContextBuilder.BuildMessages(
 		history,
@@ -1072,6 +1076,9 @@ func (al *AgentLoop) runLLMIteration(
 				al.forceCompression(agent, opts.SessionKey)
 				newHistory := agent.Sessions.GetHistory(opts.SessionKey)
 				newSummary := agent.Sessions.GetSummary(opts.SessionKey)
+				if s := agent.Sessions.GetStructuredSummary(opts.SessionKey); s != nil && !s.IsEmpty() {
+					newSummary = appendStructuredToSummary(newSummary, s)
+				}
 				messages = agent.ContextBuilder.BuildMessages(
 					newHistory, newSummary, "",
 					nil, opts.Channel, opts.ChatID,
@@ -1380,49 +1387,47 @@ func (al *AgentLoop) maybeSummarize(agent *AgentInstance, sessionKey, channel, c
 	}
 }
 
-// forceCompression aggressively reduces context when the limit is hit.
-// It drops the oldest 50% of messages (keeping system prompt and last user message).
+// forceCompression reduces context when the limit is hit. Before dropping the oldest
+// half of the conversation, it summarizes the dropped segment into the L2 structured
+// summary so key facts, decisions, and preferences are preserved.
 func (al *AgentLoop) forceCompression(agent *AgentInstance, sessionKey string) {
 	history := agent.Sessions.GetHistory(sessionKey)
 	if len(history) <= 4 {
 		return
 	}
 
-	// Keep system prompt (usually [0]) and the very last message (user's trigger)
-	// We want to drop the oldest half of the *conversation*
-	// Assuming [0] is system, [1:] is conversation
 	conversation := history[1 : len(history)-1]
 	if len(conversation) == 0 {
 		return
 	}
 
-	// Helper to find the mid-point of the conversation
 	mid := len(conversation) / 2
-
-	// New history structure:
-	// 1. System Prompt (with compression note appended)
-	// 2. Second half of conversation
-	// 3. Last message
-
+	toSummarize := conversation[:mid]
 	droppedCount := mid
 	keptConversation := conversation[mid:]
 
-	newHistory := make([]providers.Message, 0, 1+len(keptConversation)+1)
+	// Summarize the dropped segment into L2 structured summary so we don't lose key information
+	if len(toSummarize) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		existingStructured := agent.Sessions.GetStructuredSummary(sessionKey)
+		_, structured, _ := al.summarizeBatchWithStructured(ctx, agent, toSummarize, "", existingStructured)
+		cancel()
+		if structured != nil && !structured.IsEmpty() {
+			agent.Sessions.SetStructuredSummary(sessionKey, structured)
+		}
+	}
 
-	// Append compression note to the original system prompt instead of adding a new system message
-	// This avoids having two consecutive system messages which some APIs (like Zhipu) reject
+	newHistory := make([]providers.Message, 0, 1+len(keptConversation)+1)
 	compressionNote := fmt.Sprintf(
-		"\n\n[System Note: Emergency compression dropped %d oldest messages due to context limit]",
+		"\n\n[System Note: Emergency compression dropped %d oldest messages due to context limit; key points were merged into structured context.]",
 		droppedCount,
 	)
 	enhancedSystemPrompt := history[0]
 	enhancedSystemPrompt.Content = enhancedSystemPrompt.Content + compressionNote
 	newHistory = append(newHistory, enhancedSystemPrompt)
-
 	newHistory = append(newHistory, keptConversation...)
-	newHistory = append(newHistory, history[len(history)-1]) // Last message
+	newHistory = append(newHistory, history[len(history)-1])
 
-	// Update session
 	agent.Sessions.SetHistory(sessionKey, newHistory)
 	agent.Sessions.Save(sessionKey)
 
@@ -1520,13 +1525,15 @@ func formatToolsForLog(toolDefs []providers.ToolDefinition) string {
 	return sb.String()
 }
 
-// summarizeSession summarizes the conversation history for a session.
+// summarizeSession summarizes the conversation history for a session and updates
+// both the narrative summary and the structured (L2) summary for the three-layer memory.
 func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
 	history := agent.Sessions.GetHistory(sessionKey)
 	summary := agent.Sessions.GetSummary(sessionKey)
+	existingStructured := agent.Sessions.GetStructuredSummary(sessionKey)
 
 	// Keep last 4 messages for continuity
 	if len(history) <= 4 {
@@ -1559,48 +1566,178 @@ func (al *AgentLoop) summarizeSession(agent *AgentInstance, sessionKey string) {
 	const (
 		maxSummarizationMessages = 10
 		llmMaxRetries            = 3
-		llmTemperature           = 0.3
 		fallbackMaxContentLength = 200
 	)
 
-	// Multi-Part Summarization
 	var finalSummary string
+	var finalStructured *memory.StructuredSummary
+
 	if len(validMessages) > maxSummarizationMessages {
 		mid := len(validMessages) / 2
-
 		mid = al.findNearestUserMessage(validMessages, mid)
-
 		part1 := validMessages[:mid]
 		part2 := validMessages[mid:]
 
-		s1, _ := al.summarizeBatch(ctx, agent, part1, "")
-		s2, _ := al.summarizeBatch(ctx, agent, part2, "")
-
-		mergePrompt := fmt.Sprintf(
-			"Merge these two conversation summaries into one cohesive summary:\n\n1: %s\n\n2: %s",
-			s1,
-			s2,
-		)
-
-		resp, err := al.retryLLMCall(ctx, agent, mergePrompt, llmMaxRetries)
-		if err == nil && resp.Content != "" {
-			finalSummary = resp.Content
-		} else {
-			finalSummary = s1 + " " + s2
+		nar1, struct1, _ := al.summarizeBatchWithStructured(ctx, agent, part1, "", existingStructured)
+		existingMerged := mergeStructured(existingStructured, struct1)
+		nar2, struct2, _ := al.summarizeBatchWithStructured(ctx, agent, part2, nar1, existingMerged)
+		finalStructured = mergeStructured(existingMerged, struct2)
+		finalSummary = nar2
+		if finalSummary == "" {
+			finalSummary = nar1 + " " + nar2
 		}
 	} else {
-		finalSummary, _ = al.summarizeBatch(ctx, agent, validMessages, summary)
+		finalSummary, finalStructured, _ = al.summarizeBatchWithStructured(ctx, agent, validMessages, summary, existingStructured)
 	}
 
+	if finalSummary == "" {
+		finalSummary, _ = al.summarizeBatch(ctx, agent, validMessages, summary)
+	}
 	if omitted && finalSummary != "" {
 		finalSummary += "\n[Note: Some oversized messages were omitted from this summary for efficiency.]"
 	}
 
 	if finalSummary != "" {
 		agent.Sessions.SetSummary(sessionKey, finalSummary)
+		if finalStructured != nil && !finalStructured.IsEmpty() {
+			agent.Sessions.SetStructuredSummary(sessionKey, finalStructured)
+		}
 		agent.Sessions.TruncateHistory(sessionKey, 4)
 		agent.Sessions.Save(sessionKey)
 	}
+}
+
+// mergeStructured merges new into base (base can be nil). Facts, decisions, and preferences
+// are appended; current_task and pending_items are overwritten by new if non-empty.
+func mergeStructured(base, new *memory.StructuredSummary) *memory.StructuredSummary {
+	if new == nil {
+		return base
+	}
+	out := &memory.StructuredSummary{UpdatedAt: time.Now()}
+	if base != nil {
+		out.Facts = append([]string{}, base.Facts...)
+		out.Decisions = append([]memory.Decision{}, base.Decisions...)
+		out.Preferences = append([]string{}, base.Preferences...)
+		out.CurrentTask = base.CurrentTask
+		out.PendingItems = append([]string{}, base.PendingItems...)
+	}
+	out.Facts = append(out.Facts, new.Facts...)
+	out.Decisions = append(out.Decisions, new.Decisions...)
+	out.Preferences = append(out.Preferences, new.Preferences...)
+	if new.CurrentTask != "" {
+		out.CurrentTask = new.CurrentTask
+	}
+	if len(new.PendingItems) > 0 {
+		out.PendingItems = new.PendingItems
+	} else if base != nil {
+		out.PendingItems = base.PendingItems
+	}
+	return out
+}
+
+// summarizeBatchWithStructured returns a narrative summary and a structured summary (L2)
+// for the given batch, merging structured with existingStructured. Uses a dedicated
+// prompt to extract facts, decisions, preferences, current task, and pending items.
+func (al *AgentLoop) summarizeBatchWithStructured(
+	ctx context.Context,
+	agent *AgentInstance,
+	batch []providers.Message,
+	existingSummary string,
+	existingStructured *memory.StructuredSummary,
+) (narrative string, structured *memory.StructuredSummary, err error) {
+	const llmMaxRetries = 3
+
+	var sb strings.Builder
+	sb.WriteString("Summarize this conversation segment.\n\n")
+	sb.WriteString("First output a short narrative summary (2-4 sentences). Then output a JSON object on a line starting with STRUCTURED: with these keys: \"facts\" (array of key facts), \"decisions\" (array of {\"context\",\"choice\",\"reason\"}), \"preferences\" (array of user preferences, e.g. answer briefly), \"current_task\" (string), \"pending_items\" (array of unfinished to-dos). Use this exact format:\n")
+	sb.WriteString("SUMMARY:\n<narrative>\n\nSTRUCTURED:\n{...}\n\n")
+	if existingSummary != "" {
+		sb.WriteString("Existing narrative context: ")
+		sb.WriteString(existingSummary)
+		sb.WriteString("\n")
+	}
+	if existingStructured != nil && !existingStructured.IsEmpty() {
+		sb.WriteString("Existing structured context (merge new items into these): facts, decisions, preferences, current_task, pending_items.\n")
+	}
+	sb.WriteString("\nCONVERSATION:\n")
+	for _, m := range batch {
+		fmt.Fprintf(&sb, "%s: %s\n", m.Role, m.Content)
+	}
+	prompt := sb.String()
+
+	resp, err := al.retryLLMCall(ctx, agent, prompt, llmMaxRetries)
+	if err != nil || resp == nil || resp.Content == "" {
+		return "", nil, err
+	}
+
+	content := strings.TrimSpace(resp.Content)
+	narrative, structured = parseSummaryAndStructured(content)
+	if structured != nil {
+		structured = mergeStructured(existingStructured, structured)
+	}
+	return narrative, structured, nil
+}
+
+// appendStructuredToSummary appends a formatted L2 structured summary to the narrative summary
+// for inclusion in the system prompt.
+func appendStructuredToSummary(narrative string, s *memory.StructuredSummary) string {
+	var sb strings.Builder
+	if narrative != "" {
+		sb.WriteString(narrative)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("STRUCTURED_CONTEXT (reference only):\n")
+	if len(s.Facts) > 0 {
+		sb.WriteString("- Facts: ")
+		sb.WriteString(strings.Join(s.Facts, "; "))
+		sb.WriteString("\n")
+	}
+	if len(s.Decisions) > 0 {
+		for _, d := range s.Decisions {
+			fmt.Fprintf(&sb, "- Decision: %s → %s (%s)\n", d.Context, d.Choice, d.Reason)
+		}
+	}
+	if len(s.Preferences) > 0 {
+		sb.WriteString("- Preferences: ")
+		sb.WriteString(strings.Join(s.Preferences, "; "))
+		sb.WriteString("\n")
+	}
+	if s.CurrentTask != "" {
+		fmt.Fprintf(&sb, "- Current task: %s\n", s.CurrentTask)
+	}
+	if len(s.PendingItems) > 0 {
+		sb.WriteString("- Pending: ")
+		sb.WriteString(strings.Join(s.PendingItems, "; "))
+		sb.WriteString("\n")
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// parseSummaryAndStructured extracts SUMMARY: ... and STRUCTURED: {...} from LLM output.
+func parseSummaryAndStructured(content string) (narrative string, structured *memory.StructuredSummary) {
+	summaryPrefix := "SUMMARY:"
+	structuredPrefix := "STRUCTURED:"
+	idx := strings.Index(content, summaryPrefix)
+	if idx >= 0 {
+		rest := strings.TrimSpace(content[idx+len(summaryPrefix):])
+		if end := strings.Index(rest, structuredPrefix); end >= 0 {
+			narrative = strings.TrimSpace(rest[:end])
+		} else {
+			narrative = rest
+		}
+	}
+	idx = strings.Index(content, structuredPrefix)
+	if idx >= 0 {
+		jsonStr := strings.TrimSpace(content[idx+len(structuredPrefix):])
+		if end := strings.Index(jsonStr, "\n\n"); end >= 0 {
+			jsonStr = jsonStr[:end]
+		}
+		var s memory.StructuredSummary
+		if json.Unmarshal([]byte(jsonStr), &s) == nil {
+			structured = &s
+		}
+	}
+	return narrative, structured
 }
 
 // findNearestUserMessage finds the nearest user message to the given index.
@@ -1826,6 +1963,7 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 
 			agent.Sessions.SetHistory(opts.SessionKey, make([]providers.Message, 0))
 			agent.Sessions.SetSummary(opts.SessionKey, "")
+			agent.Sessions.SetStructuredSummary(opts.SessionKey, nil)
 			agent.Sessions.Save(opts.SessionKey)
 			return nil
 		}

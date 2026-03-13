@@ -56,6 +56,21 @@ func (b *JSONLBackend) SetSummary(key, summary string) {
 	}
 }
 
+func (b *JSONLBackend) GetStructuredSummary(key string) *memory.StructuredSummary {
+	sum, err := b.store.GetStructuredSummary(context.Background(), key)
+	if err != nil {
+		log.Printf("session: get structured summary: %v", err)
+		return nil
+	}
+	return sum
+}
+
+func (b *JSONLBackend) SetStructuredSummary(key string, summary *memory.StructuredSummary) {
+	if err := b.store.SetStructuredSummary(context.Background(), key, summary); err != nil {
+		log.Printf("session: set structured summary: %v", err)
+	}
+}
+
 func (b *JSONLBackend) SetHistory(key string, history []providers.Message) {
 	if err := b.store.SetHistory(context.Background(), key, history); err != nil {
 		log.Printf("session: set history: %v", err)

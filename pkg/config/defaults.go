@@ -35,6 +35,8 @@ func DefaultConfig() *Config {
 				MaxToolIterations:         50,
 				SummarizeMessageThreshold: 20,
 				SummarizeTokenPercent:     75,
+				ShortTermMessages:         10,
+				LongTermRetentionDays:     30,
 			},
 		},
 		Bindings: []AgentBinding{},

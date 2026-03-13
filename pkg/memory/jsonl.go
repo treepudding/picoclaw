@@ -84,6 +84,10 @@ func (s *JSONLStore) metaPath(key string) string {
 	return filepath.Join(s.dir, sanitizeKey(key)+".meta.json")
 }
 
+func (s *JSONLStore) structuredPath(key string) string {
+	return filepath.Join(s.dir, sanitizeKey(key)+".structured.json")
+}
+
 // sanitizeKey converts a session key to a safe filename component.
 // Mirrors pkg/session.sanitizeFilename so that migration paths match.
 //
@@ -322,6 +326,46 @@ func (s *JSONLStore) SetSummary(
 	meta.UpdatedAt = now
 
 	return s.writeMeta(sessionKey, meta)
+}
+
+func (s *JSONLStore) GetStructuredSummary(
+	_ context.Context, sessionKey string,
+) (*StructuredSummary, error) {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	data, err := os.ReadFile(s.structuredPath(sessionKey))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("memory: read structured summary: %w", err)
+	}
+	var sum StructuredSummary
+	if err := json.Unmarshal(data, &sum); err != nil {
+		return nil, fmt.Errorf("memory: decode structured summary: %w", err)
+	}
+	return &sum, nil
+}
+
+func (s *JSONLStore) SetStructuredSummary(
+	_ context.Context, sessionKey string, summary *StructuredSummary,
+) error {
+	l := s.sessionLock(sessionKey)
+	l.Lock()
+	defer l.Unlock()
+
+	if summary == nil {
+		_ = os.Remove(s.structuredPath(sessionKey))
+		return nil
+	}
+	summary.UpdatedAt = time.Now()
+	data, err := json.MarshalIndent(summary, "", "  ")
+	if err != nil {
+		return fmt.Errorf("memory: encode structured summary: %w", err)
+	}
+	return fileutil.WriteFileAtomic(s.structuredPath(sessionKey), data, 0o644)
 }
 
 func (s *JSONLStore) TruncateHistory(

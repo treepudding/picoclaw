@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.picoclaw.gateway</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/wenzhexu/.local/bin/picoclaw</string>
+        <string>gateway</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/wenzhexu/.picoclaw/gateway.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/wenzhexu/.picoclaw/gateway.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/wenzhexu/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HTTP_PROXY</key>
+        <string>http://127.0.0.1:7890</string>
+        <key>HTTPS_PROXY</key>
+        <string>http://127.0.0.1:7890</string>
+        <key>ALL_PROXY</key>
+        <string>socks5://127.0.0.1:7890</string>
+        <key>AGENT_BROWSER_PROXY</key>
+        <string>http://127.0.0.1:7890</string>
+    </dict>
+</dict>
+</plist>

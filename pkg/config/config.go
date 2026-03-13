@@ -205,6 +205,8 @@ type AgentDefaults struct {
 	MaxToolIterations         int            `json:"max_tool_iterations"             env:"PICOCLAW_AGENTS_DEFAULTS_MAX_TOOL_ITERATIONS"`
 	SummarizeMessageThreshold int            `json:"summarize_message_threshold"     env:"PICOCLAW_AGENTS_DEFAULTS_SUMMARIZE_MESSAGE_THRESHOLD"`
 	SummarizeTokenPercent     int            `json:"summarize_token_percent"         env:"PICOCLAW_AGENTS_DEFAULTS_SUMMARIZE_TOKEN_PERCENT"`
+	ShortTermMessages         int            `json:"short_term_messages"             env:"PICOCLAW_AGENTS_DEFAULTS_SHORT_TERM_MESSAGES"`
+	LongTermRetentionDays     int            `json:"long_term_retention_days"        env:"PICOCLAW_AGENTS_DEFAULTS_LONG_TERM_RETENTION_DAYS"`
 	MaxMediaSize              int            `json:"max_media_size,omitempty"        env:"PICOCLAW_AGENTS_DEFAULTS_MAX_MEDIA_SIZE"`
 	Routing                   *RoutingConfig `json:"routing,omitempty"`
 }

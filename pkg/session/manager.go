@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sipeed/picoclaw/pkg/memory"
 	"github.com/sipeed/picoclaw/pkg/providers"
 )
 
@@ -120,6 +121,13 @@ func (sm *SessionManager) SetSummary(key string, summary string) {
 		session.Summary = summary
 		session.Updated = time.Now()
 	}
+}
+
+func (sm *SessionManager) GetStructuredSummary(key string) *memory.StructuredSummary {
+	return nil
+}
+
+func (sm *SessionManager) SetStructuredSummary(key string, summary *memory.StructuredSummary) {
 }
 
 func (sm *SessionManager) TruncateHistory(key string, keepLast int) {
