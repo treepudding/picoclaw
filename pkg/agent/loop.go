@@ -225,6 +225,13 @@ func registerSharedTools(
 			if cfg.Tools.IsToolEnabled("subagent") {
 				subagentManager := tools.NewSubagentManager(provider, agent.Model, agent.Workspace)
 				subagentManager.SetLLMOptions(agent.MaxTokens, agent.Temperature)
+				// Set model resolver so spawn can use target agent's model
+				subagentManager.SetModelResolver(func(targetAgentID string) string {
+					if targetAgent, ok := registry.GetAgent(targetAgentID); ok {
+						return targetAgent.Model
+					}
+					return ""
+				})
 				spawnTool := tools.NewSpawnTool(subagentManager)
 				currentAgentID := agentID
 				spawnTool.SetAllowlistChecker(func(targetAgentID string) bool {
@@ -468,9 +475,10 @@ var audioAnnotationRe = regexp.MustCompile(`\[(voice|audio)(?::[^\]]*)?\]`)
 
 // transcribeAudioInMessage resolves audio media refs, transcribes them, and
 // replaces audio annotations in msg.Content with the transcribed text.
-func (al *AgentLoop) transcribeAudioInMessage(ctx context.Context, msg bus.InboundMessage) bus.InboundMessage {
+// Returns the (possibly modified) message and true if audio was transcribed.
+func (al *AgentLoop) transcribeAudioInMessage(ctx context.Context, msg bus.InboundMessage) (bus.InboundMessage, bool) {
 	if al.transcriber == nil || al.mediaStore == nil || len(msg.Media) == 0 {
-		return msg
+		return msg, false
 	}
 
 	// Transcribe each audio media ref in order.
@@ -494,8 +502,10 @@ func (al *AgentLoop) transcribeAudioInMessage(ctx context.Context, msg bus.Inbou
 	}
 
 	if len(transcriptions) == 0 {
-		return msg
+		return msg, false
 	}
+
+	al.sendTranscriptionFeedback(ctx, msg.Channel, msg.ChatID, msg.MessageID, transcriptions)
 
 	// Replace audio annotations sequentially with transcriptions.
 	idx := 0
@@ -514,7 +524,48 @@ func (al *AgentLoop) transcribeAudioInMessage(ctx context.Context, msg bus.Inbou
 	}
 
 	msg.Content = newContent
-	return msg
+	return msg, true
+}
+
+// sendTranscriptionFeedback sends feedback to the user with the result of
+// audio transcription if the option is enabled. It uses Manager.SendMessage
+// which executes synchronously (rate limiting, splitting, retry) so that
+// ordering with the subsequent placeholder is guaranteed.
+func (al *AgentLoop) sendTranscriptionFeedback(
+	ctx context.Context,
+	channel, chatID, messageID string,
+	validTexts []string,
+) {
+	if !al.cfg.Voice.EchoTranscription {
+		return
+	}
+	if al.channelManager == nil {
+		return
+	}
+
+	var nonEmpty []string
+	for _, t := range validTexts {
+		if t != "" {
+			nonEmpty = append(nonEmpty, t)
+		}
+	}
+
+	var feedbackMsg string
+	if len(nonEmpty) > 0 {
+		feedbackMsg = "Transcript: " + strings.Join(nonEmpty, "\n")
+	} else {
+		feedbackMsg = "No voice detected in the audio"
+	}
+
+	err := al.channelManager.SendMessage(ctx, bus.OutboundMessage{
+		Channel:          channel,
+		ChatID:           chatID,
+		Content:          feedbackMsg,
+		ReplyToMessageID: messageID,
+	})
+	if err != nil {
+		logger.WarnCF("voice", "Failed to send transcription feedback", map[string]any{"error": err.Error()})
+	}
 }
 
 // inferMediaType determines the media type ("image", "audio", "video", "file")
@@ -628,7 +679,14 @@ func (al *AgentLoop) processMessage(ctx context.Context, msg bus.InboundMessage)
 		},
 	)
 
-	msg = al.transcribeAudioInMessage(ctx, msg)
+	var hadAudio bool
+	msg, hadAudio = al.transcribeAudioInMessage(ctx, msg)
+
+	// For audio messages the placeholder was deferred by the channel.
+	// Now that transcription (and optional feedback) is done, send it.
+	if hadAudio && al.channelManager != nil {
+		al.channelManager.SendPlaceholder(ctx, msg.Channel, msg.ChatID)
+	}
 
 	// Route system messages to processSystemMessage
 	if msg.Channel == "system" {
@@ -1949,7 +2007,29 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 		}
 		rt.SwitchModel = func(value string) (string, error) {
 			oldModel := agent.Model
-			agent.Model = value
+
+			// Find the model config from model_list by model_name
+			var targetModelCfg *config.ModelConfig
+			for i := range al.cfg.ModelList {
+				if al.cfg.ModelList[i].ModelName == value {
+					targetModelCfg = &al.cfg.ModelList[i]
+					break
+				}
+			}
+			if targetModelCfg == nil {
+				return "", fmt.Errorf("model %q not found in model_list", value)
+			}
+
+			// Create new provider from the model config
+			newProvider, modelID, err := providers.CreateProviderFromConfig(targetModelCfg)
+			if err != nil {
+				return "", fmt.Errorf("failed to create provider for model %q: %w", value, err)
+			}
+
+			// Update agent's provider and model
+			agent.Provider = newProvider
+			agent.Model = modelID
+
 			return oldModel, nil
 		}
 
