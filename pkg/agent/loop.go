@@ -1870,7 +1870,29 @@ func (al *AgentLoop) buildCommandsRuntime(agent *AgentInstance, opts *processOpt
 		}
 		rt.SwitchModel = func(value string) (string, error) {
 			oldModel := agent.Model
-			agent.Model = value
+
+			// Find the model config from model_list by model_name
+			var targetModelCfg *config.ModelConfig
+			for i := range al.cfg.ModelList {
+				if al.cfg.ModelList[i].ModelName == value {
+					targetModelCfg = &al.cfg.ModelList[i]
+					break
+				}
+			}
+			if targetModelCfg == nil {
+				return "", fmt.Errorf("model %q not found in model_list", value)
+			}
+
+			// Create new provider from the model config
+			newProvider, modelID, err := providers.CreateProviderFromConfig(targetModelCfg)
+			if err != nil {
+				return "", fmt.Errorf("failed to create provider for model %q: %w", value, err)
+			}
+
+			// Update agent's provider and model
+			agent.Provider = newProvider
+			agent.Model = modelID
+
 			return oldModel, nil
 		}
 
